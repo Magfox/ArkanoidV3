@@ -1,0 +1,111 @@
+﻿#include "Actor/ArkanoidBricks.h"
+#include "Actor/ArkanoidBall.h"
+#include "Core/ArkanoidGameState.h"
+#include "Bonuses/ArkanoidBonus.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/World.h"
+#include "Core/ArkanoidGameMode.h" // <--- 1. ДОБАВЬ ЭТОТ ИНКЛЮД
+
+AArkanoidBricks::AArkanoidBricks()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    BrickMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BrickMesh"));
+    RootComponent = BrickMesh;
+
+    BrickMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    BrickMesh->SetNotifyRigidBodyCollision(true); 
+}
+
+void AArkanoidBricks::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+    UpdateVisuals();
+}
+
+void AArkanoidBricks::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (BrickMesh)
+    {
+        BrickMesh->OnComponentHit.AddDynamic(this, &AArkanoidBricks::OnBrickHit);
+    }
+    UpdateVisuals();
+}
+
+void AArkanoidBricks::OnBrickHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+    if (OtherActor && OtherActor->IsA(AArkanoidBall::StaticClass()))
+    {
+        HandleBrickHit();
+    }
+}
+
+void AArkanoidBricks::HandleBrickHit()
+{
+    HitsToDestroy--;
+
+    if (HitsToDestroy <= 0)
+    {
+        // 1. Начисляем очки
+        if (AArkanoidGameState* GS = GetWorld()->GetGameState<AArkanoidGameState>())
+        {
+            GS->AddScore(PointsValue);
+        }
+        
+        // 2. СООБЩАЕМ ГЕЙММОДУ О СМЕРТИ (НОВОЕ)
+        // Без этого не сработает победа на уровне!
+        if (AArkanoidGameMode* GM = GetWorld()->GetAuthGameMode<AArkanoidGameMode>())
+        {
+            GM->NotifyBrickDestroyed();
+        }
+
+        // 3. ЛОГИКА СПАВНА БОНУСА 
+        if (PossibleBonuses.Num() > 0)
+        {
+            const float RandomRoll = FMath::RandRange(0.0f, 100.0f);
+
+            if (RandomRoll <= BonusDropChancePercentage)
+            {
+                const int32 SelectionIndex = FMath::RandRange(0, PossibleBonuses.Num() - 1);
+                TSubclassOf<AArkanoidBonus> SelectedBonusClass = PossibleBonuses[SelectionIndex];
+
+                if (SelectedBonusClass)
+                {
+                    FActorSpawnParameters SpawnParams;
+                    SpawnParams.Owner = this; 
+                    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+                    GetWorld()->SpawnActor<AArkanoidBonus>(
+                        SelectedBonusClass,
+                        GetActorLocation(),
+                        GetActorRotation(),
+                        SpawnParams
+                    );
+                }
+            }
+        }
+
+        // 4. Уничтожаем кирпич
+        Destroy();
+    }
+    else
+    {
+        // Меняем цвет, если еще жив
+        UpdateVisuals();
+    }
+}
+
+void AArkanoidBricks::UpdateVisuals()
+{
+    if (!BrickMesh || HealthMaterials.IsEmpty()) return;
+
+    int32 MaterialIndex = FMath::Clamp(HitsToDestroy - 1, 0, HealthMaterials.Num() - 1);
+
+    if (HealthMaterials.IsValidIndex(MaterialIndex) && HealthMaterials[MaterialIndex])
+    {
+        BrickMesh->SetMaterial(0, HealthMaterials[MaterialIndex]);
+    }
+}

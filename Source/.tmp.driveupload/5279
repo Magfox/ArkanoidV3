@@ -1,0 +1,137 @@
+﻿#include "Core/ArkanoidGameMode.h" 
+#include "Core/ArkanoidHUD.h"
+#include "Pawn/ArkanoidPaddle.h"
+#include "Actor/ArkanoidCamera.h" 
+#include "Core/ArkanoidGameState.h"
+#include "Kismet/GameplayStatics.h"
+#include "Actor/ArkanoidBall.h" 
+#include "Core/ArkanoidGameInstance.h" 
+#include "Actor/ArkanoidBricks.h" // Убедись что файл называется именно так (Bricks или Brick)
+
+AArkanoidGameMode::AArkanoidGameMode()
+{
+    DefaultPawnClass = AArkanoidPaddle::StaticClass();
+    GameStateClass = AArkanoidGameState::StaticClass();
+    HUDClass = AArkanoidHUD::StaticClass();
+}
+
+void AArkanoidGameMode::StartPlay()
+{
+    Super::StartPlay();
+
+    // Получаем GameState
+    if (AArkanoidGameState* GS = GetGameState<AArkanoidGameState>())
+    {
+       // Устанавливаем начальное количество жизней в GameState
+       GS->SetLives(MaxLives);
+    }
+
+    // Настройка камеры
+    AActor* FoundCamera = UGameplayStatics::GetActorOfClass(GetWorld(), GameCameraClass);
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (PC && FoundCamera)
+    {
+       PC->SetViewTargetWithBlend(FoundCamera, 0.0f);
+    }
+
+   // Считаем кирпичи на уровне
+   TArray<AActor*> Bricks;
+   // ВНИМАНИЕ: Проверь точное имя класса кирпича (AArkanoidBricks или AArkanoidBrick)
+   UGameplayStatics::GetAllActorsOfClass(GetWorld(), AArkanoidBricks::StaticClass(), Bricks);
+   RemainingBricks = Bricks.Num();
+
+   UE_LOG(LogTemp, Warning, TEXT("Level Started. Bricks to destroy: %d"), RemainingBricks);
+}
+
+void AArkanoidGameMode::OnBallLost()
+{
+    // --- ЛОГИКА МУЛЬТИ-БОЛЛА ---
+    
+    // Считаем все мячи, которые сейчас есть в мире
+    TArray<AActor*> ActiveBalls;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AArkanoidBall::StaticClass(), ActiveBalls);
+
+    // Если мячей больше 1 (тот, что падает + еще хотя бы один в поле),
+    // то мы НЕ отнимаем жизнь.
+    if (ActiveBalls.Num() > 1)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Ball lost, but %d balls remain. Keep playing!"), ActiveBalls.Num() - 1);
+        return; // <-- Просто выходим, игра продолжается
+    }
+
+    // --- СТАНДАРТНАЯ ЛОГИКА (Если мяч был последний) ---
+
+    if (AArkanoidGameState* GS = GetGameState<AArkanoidGameState>())
+    {
+       // 1. Сначала чистим бонусы в UI, так как мы потеряли жизнь
+       GS->ClearAllBonuses();
+
+       // 2. Получаем текущее количество жизней из GameState
+       int32 CurrentLives = GS->GetCurrentLives();
+       CurrentLives--;
+
+       // 3. Обновляем данные для UI через GameState
+       GS->SetLives(CurrentLives);
+
+       UE_LOG(LogTemp, Warning, TEXT("Last Ball Lost! Lives remaining: %d"), CurrentLives);
+
+       if (CurrentLives > 0)
+       {
+          // Если жизни остались — создаем новый мяч
+          RespawnBallForPlayer();
+       }
+       else
+       {
+          // Жизни кончились -> Game Over
+          UE_LOG(LogTemp, Error, TEXT("GAME OVER!"));
+          // Здесь можно вызвать виджет проигрыша или перезагрузить уровень
+       }
+    }
+}
+
+void AArkanoidGameMode::RespawnBallForPlayer()
+{
+    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+    {
+       if (AArkanoidPaddle* Paddle = Cast<AArkanoidPaddle>(PC->GetPawn()))
+       {
+          Paddle->RespawnBall();
+       }
+    }
+}
+
+// --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ---
+void AArkanoidGameMode::NotifyBrickDestroyed()
+{
+    // Отнимаем один кирпич из счетчика
+    RemainingBricks--;
+
+    // Если кирпичей не осталось -> ПОБЕДА
+    if (RemainingBricks <= 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VICTORY! All bricks destroyed."));
+
+        // 1. Сохраняем прогресс (открываем след. уровень)
+        if (UArkanoidGameInstance* GI = Cast<UArkanoidGameInstance>(GetGameInstance()))
+        {
+            GI->CompleteLevel(CurrentLevelIndex);
+        }
+
+        // 2. Останавливаем мячи (чтобы не летали во время паузы)
+        TArray<AActor*> ActiveBalls;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AArkanoidBall::StaticClass(), ActiveBalls);
+        for (AActor* BallActor : ActiveBalls)
+        {
+            BallActor->SetActorTickEnabled(false); 
+        }
+
+        // 3. Запускаем таймер на 1 секунду перед переходом в меню
+        GetWorldTimerManager().SetTimer(TimerHandle_WinDelay, this, &AArkanoidGameMode::GoToMainMenu, 1.0f, false);
+    }
+}
+
+void AArkanoidGameMode::GoToMainMenu()
+{
+    // Открываем уровень с именем MainMenu
+    UGameplayStatics::OpenLevel(this, FName("MainMenu"));
+}

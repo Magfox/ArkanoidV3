@@ -1,0 +1,89 @@
+﻿#include "Core/ArkanoidGameState.h" // Проверь путь (ArkanoidV3/Public/Core/...) если нужно
+#include "Bonuses/ArkanoidBonus.h" 
+
+AArkanoidGameState::AArkanoidGameState()
+{
+    CurrentScore = 0;
+    CurrentLives = 3;
+}
+
+void AArkanoidGameState::AddScore(int32 Amount)
+{
+    CurrentScore += Amount;
+}
+
+void AArkanoidGameState::SetLives(int32 NewLives)
+{
+    CurrentLives = NewLives;
+}
+
+// --- ЛОГИКА ТАЙМЕРА (СПИСОК) ---
+
+void AArkanoidGameState::StartBonusTimer(TSubclassOf<AArkanoidBonus> BonusClass, float Duration)
+{
+    if (!GetWorld()) return;
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float NewEndTime = CurrentTime + Duration;
+
+    // 1. Проверяем, есть ли уже такой бонус в списке
+    bool bFound = false;
+    for (FActiveBonusEntry& Entry : ActiveBonusesList)
+    {
+        if (Entry.BonusClass == BonusClass)
+        {
+            // Нашли — обновляем время окончания (продлеваем)
+            Entry.EndTimeStamp = NewEndTime;
+            bFound = true;
+            break;
+        }
+    }
+
+    // 2. Если не нашли — добавляем новую запись
+    if (!bFound)
+    {
+        FActiveBonusEntry NewEntry;
+        NewEntry.BonusClass = BonusClass;
+        NewEntry.EndTimeStamp = NewEndTime;
+        ActiveBonusesList.Add(NewEntry);
+    }
+}
+
+TArray<FBonusUIData> AArkanoidGameState::GetActiveBonusList()
+{
+    TArray<FBonusUIData> ResultArray;
+    
+    UWorld* World = GetWorld();
+    if (!World) return ResultArray;
+
+    float CurrentTime = World->GetTimeSeconds();
+
+    // Проходим по списку в обратном порядке, чтобы безопасно удалять элементы
+    for (int32 i = ActiveBonusesList.Num() - 1; i >= 0; i--)
+    {
+        FActiveBonusEntry& Entry = ActiveBonusesList[i];
+
+        // Если время бонуса истекло
+        if (CurrentTime >= Entry.EndTimeStamp)
+        {
+            ActiveBonusesList.RemoveAt(i);
+        }
+        else
+        {
+            // Если бонус активен — формируем структуру для UI
+            FBonusUIData UIData;
+            UIData.BonusClass = Entry.BonusClass;
+            UIData.TimeRemaining = Entry.EndTimeStamp - CurrentTime;
+            UIData.bIsActive = true;
+            
+            ResultArray.Add(UIData);
+        }
+    }
+
+    return ResultArray;
+}
+
+void AArkanoidGameState::ClearAllBonuses()
+{
+    ActiveBonusesList.Empty();
+}

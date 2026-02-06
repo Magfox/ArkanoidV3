@@ -1,0 +1,88 @@
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameStateBase.h"
+#include "ArkanoidGameState.generated.h"
+
+// Forward declaration
+class AArkanoidBonus;
+
+/**
+ * @brief Внутренняя структура для хранения активного бонуса в массиве.
+ */
+USTRUCT()
+struct FActiveBonusEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TSubclassOf<AArkanoidBonus> BonusClass;
+
+    UPROPERTY()
+    float EndTimeStamp = 0.0f;
+};
+
+/**
+ * @brief Данные для UI: какой бонус активен и сколько осталось времени.
+ * (Твоя структура, оставил без изменений)
+ */
+USTRUCT(BlueprintType)
+struct FBonusUIData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    TSubclassOf<AArkanoidBonus> BonusClass;
+
+    UPROPERTY(BlueprintReadOnly)
+    float TimeRemaining = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsActive = false; 
+};
+
+UCLASS()
+class ARKANOIDV3_API AArkanoidGameState : public AGameStateBase
+{
+    GENERATED_BODY()
+
+public:
+    AArkanoidGameState();
+
+    // --- ИГРОВАЯ СТАТИСТИКА ---
+
+    void AddScore(int32 Amount);
+    void SetLives(int32 NewLives);
+
+    UFUNCTION(BlueprintPure, Category = "Arkanoid | GameProgress")
+    int32 GetCurrentScore() const { return CurrentScore; }
+
+    UFUNCTION(BlueprintPure, Category = "Arkanoid | GameProgress")
+    int32 GetCurrentLives() const { return CurrentLives; }
+
+    // --- СИСТЕМА ТАЙМЕРА БОНУСОВ ---
+
+    /** Запускает таймер или обновляет его, если бонус уже есть */
+    void StartBonusTimer(TSubclassOf<AArkanoidBonus> BonusClass, float Duration);
+
+    /** * Получить список всех активных бонусов для HUD.
+     * Возвращает МАССИВ структур FBonusUIData.
+     */
+    UFUNCTION(BlueprintPure, Category = "Arkanoid | UI")
+    TArray<FBonusUIData> GetActiveBonusList();
+
+    /** Очищает список активных бонусов (вызывать при смерти) */
+    void ClearAllBonuses();
+
+protected:
+    // Количество очков
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arkanoid | Stats")
+    int32 CurrentScore;
+    // Количество жизней
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arkanoid | Stats")
+    int32 CurrentLives;
+
+    // --- ВНУТРЕННИЕ ПЕРЕМЕННЫЕ ТАЙМЕРА ---
+    // Заменили одиночные переменные на список, чтобы хранить несколько бонусов
+    TArray<FActiveBonusEntry> ActiveBonusesList;
+};
